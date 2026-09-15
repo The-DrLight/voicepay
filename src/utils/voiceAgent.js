@@ -122,11 +122,48 @@ function quickParse(text, currentStep) {
   }
 
   if (currentStep === "account_number" || currentStep === "phone_airtime" || currentStep === "phone_data") {
-    const digits = t.replace(/[^0-9]/g, "");
+    // Convert spoken digit words to numerals, and strip the "it's" prefix
+    // browser STT sometimes adds, before extracting digits.
+    let converted = t
+      .replace(/\bit'?s\b/gi, "")
+      .replace(/\beight\b/g, "8")
+      .replace(/\beights\b/g, "8")
+      .replace(/\bseven\b/g, "7")
+      .replace(/\bsix\b/g, "6")
+      .replace(/\bfive\b/g, "5")
+      .replace(/\bfour\b/g, "4")
+      .replace(/\bthree\b/g, "3")
+      .replace(/\btwo\b/g, "2")
+      .replace(/\bone\b/g, "1")
+      .replace(/\bzero\b/g, "0")
+      .replace(/\bnine\b/g, "9")
+      .replace(/\bnought\b/g, "0")
+      .replace(/\boh\b/g, "0");
+
+    const digits = converted.replace(/[^0-9]/g, "");
+
     const field = currentStep === "account_number" ? "account_number" : "phone";
-    const minLen = 10;
+    const minLen = 8; // accept 8+ digits, validation will check for 10
+
     if (digits.length >= minLen) {
-      return { action: "COLLECT_FIELD", field, value: digits, valid: true };
+      return {
+        action: "COLLECT_FIELD",
+        field,
+        value: digits,
+        valid: digits.length === 10,
+        error: digits.length !== 10 ? `I got ${digits.length} digits. Please say all 10 digits.` : null,
+      };
+    }
+
+    // Less than 8 digits, try anyway if we got something
+    if (digits.length > 0) {
+      return {
+        action: "COLLECT_FIELD",
+        field,
+        value: digits,
+        valid: false,
+        error: `I got ${digits.length} digits. Please say all 10 digits clearly.`,
+      };
     }
   }
 
