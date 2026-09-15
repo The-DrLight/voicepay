@@ -15,6 +15,7 @@ import { useVoiceCommand } from "./hooks/useVoiceCommand";
 import { parseIntent, INTENTS } from "./utils/intentParser";
 import { speak } from "./utils/ttsService";
 import { getFlow } from "./utils/conversationFlow";
+import { extractField } from "./utils/fieldExtractor";
 
 const SCREEN_NAMES = {
   home: "Dashboard",
@@ -174,8 +175,9 @@ export default function App() {
         const flow = getFlow(type);
         const currentStep = flow[stepIndex];
 
-        const newCollected = { ...collected, [currentStep.field]: text };
-        console.log("[VP] Conversation step:", currentStep.field, "->", text);
+        const cleanValue = await extractField(currentStep.field, text);
+        const newCollected = { ...collected, [currentStep.field]: cleanValue };
+        console.log("[VP] Conversation step:", currentStep.field, "->", cleanValue);
         const nextIndex = stepIndex + 1;
 
         if (nextIndex < flow.length) {
@@ -184,7 +186,7 @@ export default function App() {
           setConvFlow(updated);
           convFlowRef.current = updated;
 
-          const confirmText = currentStep.confirm(text);
+          const confirmText = currentStep.confirm(cleanValue);
           const nextPrompt = `${confirmText} ${flow[nextIndex].question}`;
           console.log("[VP] TTS speaking:", nextPrompt);
           await speak(nextPrompt);

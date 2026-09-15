@@ -1,9 +1,9 @@
 import express from 'express'
-import { createProxyMiddleware } from 'http-proxy-middleware'
 import { createServer } from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import httpProxy from 'http-proxy'
+import fetch from 'node-fetch'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -12,32 +12,49 @@ const PORT = process.env.PORT || 3000
 const INTRON_KEY = process.env.VITE_INTRON_API_KEY
 const GROQ_KEY = process.env.GROQ_API_KEY
 
+app.use(express.json())
+
 // Serve built React app
 app.use(express.static(path.join(__dirname, 'dist')))
 
-// Proxy TTS generate (HTTP)
-app.use('/tts-generate', createProxyMiddleware({
-  target: 'https://infer.voice.intron.io',
-  changeOrigin: true,
-  pathRewrite: { '^/tts-generate': '/tts/v1/generate' },
-  on: {
-    proxyReq: (proxyReq) => {
-      proxyReq.setHeader('Authorization', `Bearer ${INTRON_KEY}`)
-    }
+// TTS generate (HTTP)
+app.post('/tts-generate', async (req, res) => {
+  try {
+    console.log('[SERVER] TTS Generate request:', req.body)
+    const response = await fetch('https://infer.voice.intron.io/tts/v1/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${INTRON_KEY}`
+      },
+      body: JSON.stringify(req.body)
+    })
+    const data = await response.json()
+    console.log('[SERVER] TTS Generate response status:', response.status)
+    res.json(data)
+  } catch (err) {
+    console.error('[SERVER] TTS Generate error:', err)
+    res.status(500).json({ error: err.message })
   }
-}))
+})
 
-// Proxy Groq (HTTP)
-app.use('/ai-extract', createProxyMiddleware({
-  target: 'https://api.groq.com',
-  changeOrigin: true,
-  pathRewrite: { '^/ai-extract': '/openai/v1/chat/completions' },
-  on: {
-    proxyReq: (proxyReq) => {
-      proxyReq.setHeader('Authorization', `Bearer ${GROQ_KEY}`)
-    }
+// Groq field extraction (HTTP)
+app.post('/ai-extract', async (req, res) => {
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_KEY}`
+      },
+      body: JSON.stringify(req.body)
+    })
+    const data = await response.json()
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
-}))
+})
 
 // All other routes serve React app
 app.get('*', (req, res) => {
