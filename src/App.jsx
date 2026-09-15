@@ -12,10 +12,8 @@ import TranscriptBar from "./components/TranscriptBar";
 import SplashScreen from "./components/SplashScreen";
 import AppHeader from "./components/AppHeader";
 import { useVoiceCommand } from "./hooks/useVoiceCommand";
-import { parseIntent, INTENTS } from "./utils/intentParser";
+import { processCommand } from "./utils/voiceAgent";
 import { speak } from "./utils/ttsService";
-import { getFlow } from "./utils/conversationFlow";
-import { extractField } from "./utils/fieldExtractor";
 
 const SCREEN_NAMES = {
   home: "Dashboard",
@@ -27,15 +25,91 @@ const SCREEN_NAMES = {
   settings: "Settings",
 };
 
+function formatAmount(amount) {
+  const num = parseFloat(amount);
+  if (isNaN(num)) return amount;
+  return `₦${num.toLocaleString("en-NG")}`;
+}
+
+function getAvailableActions(screen) {
+  const actions = {
+    home: ["send money", "buy airtime", "buy data", "pay bills", "check history", "check balance", "open settings"],
+    transfer: ["say bank number", "say account number", "say recipient name", "say amount", "say narration", "say confirm or cancel"],
+    airtime: ["say network number", "say phone number", "say amount", "say confirm or cancel"],
+    data: ["say network number", "say phone number", "say confirm or cancel"],
+    bills: ["say bill type", "say meter number", "say amount", "say confirm or cancel"],
+  };
+  return actions[screen] || actions.home;
+}
+
+function getContextualHelp(screen, step) {
+  if (screen === "home") {
+    return "You can say: send money, buy airtime, buy data, pay bills, or check history.";
+  }
+  if (step === "bank") {
+    return "Please say a number for your bank. 1 for GTBank, 6 for Opay, 7 for PalmPay.";
+  }
+  if (step === "account_number") {
+    return "Please say your 10-digit account number.";
+  }
+  if (step === "amount") {
+    return "Please say an amount, like ten thousand naira.";
+  }
+  return "Say go back to return to the dashboard.";
+}
+
+const TRANSFER_STEPS = ["bank", "account_number", "recipient_name", "amount", "narration"];
+
+function getNextPrompt(currentStep, field, value, collected, screen) {
+  if (screen === "transfer" && TRANSFER_STEPS.includes(field)) {
+    const currentIndex = TRANSFER_STEPS.indexOf(field);
+
+    if (currentIndex < TRANSFER_STEPS.length - 1) {
+      const next = TRANSFER_STEPS[currentIndex + 1];
+      const prompts = {
+        account_number: `Got it, ${value}. What is the 10-digit account number?`,
+        recipient_name: "Account number saved. What is the recipient name?",
+        amount: `Got it, sending to ${value}. How much do you want to send?`,
+        narration: `Amount is ${formatAmount(value)}. Any narration? Say skip to continue.`,
+      };
+      return { done: false, nextStep: next, prompt: prompts[next] };
+    }
+    return { done: true };
+  }
+
+  if (currentStep === "network_airtime") {
+    return {
+      done: false,
+      nextStep: "phone_airtime",
+      prompt: `${value} selected. What phone number? Say use my number for your registered number.`,
+    };
+  }
+  if (currentStep === "phone_airtime") {
+    return { done: false, nextStep: "amount_airtime", prompt: "Phone number saved. How much airtime?" };
+  }
+  if (currentStep === "amount_airtime") {
+    return { done: true };
+  }
+
+  if (currentStep === "network_data") {
+    return { done: false, nextStep: "phone_data", prompt: `${value} selected. What phone number?` };
+  }
+  if (currentStep === "phone_data") {
+    return { done: true };
+  }
+
+  return { done: true };
+}
+
 export default function App() {
   const [started, setStarted] = useState(false);
   const [currentScreen, setCurrentScreen] = useState("home");
+  const [currentStep, setCurrentStep] = useState(null);
+  const [collectedData, setCollectedData] = useState({});
   const [revealBalance, setRevealBalance] = useState(false);
   const [transferDetails, setTransferDetails] = useState({});
   const [dataDetails, setDataDetails] = useState({});
   const [showMoreSheet, setShowMoreSheet] = useState(false);
-  // null | { type: 'transfer' | 'data' | 'airtime', stepIndex, collected }
-  const [convFlow, setConvFlow] = useState(null);
 
   const isMountedRef = useRef(true);
   // startListening isn't available until useVoiceCommand returns it below,
@@ -49,9 +123,10 @@ export default function App() {
   // useCallback (its deps never change), so it always sees stale state
   // unless read through a ref.
   const currentScreenRef = useRef(currentScreen);
+  const currentStepRef = useRef(currentStep);
+  const collectedDataRef = useRef(collectedData);
   const transferDetailsRef = useRef(transferDetails);
   const dataDetailsRef = useRef(dataDetails);
-  const convFlowRef = useRef(null);
 
   useEffect(() => {
     console.log("[VP] App mounted");
@@ -60,6 +135,14 @@ export default function App() {
   useEffect(() => {
     currentScreenRef.current = currentScreen;
   }, [currentScreen]);
+
+  useEffect(() => {
+    currentStepRef.current = currentStep;
+  }, [currentStep]);
+
+  useEffect(() => {
+    collectedDataRef.current = collectedData;
+  }, [collectedData]);
 
   useEffect(() => {
     transferDetailsRef.current = transferDetails;
@@ -77,217 +160,195 @@ export default function App() {
     setCurrentScreen(screen);
   };
 
-  const formatAmount = (amount) => {
-    const num = parseFloat(amount);
-    if (isNaN(num)) return amount;
-    return `₦${num.toLocaleString("en-NG")}`;
+  const restartMic = () => {
+    if (isMountedRef.current && autoRestartEnabledRef.current) {
+      console.log("[VP] Mic started");
+      startListeningRef.current?.();
+    }
   };
 
-  const handleIntent = (intent) => {
-    switch (intent) {
-      case INTENTS.NAVIGATE_TRANSFER:
-        navigate("transfer");
-        return speak("Opening transfer.").then(async () => {
-          console.log("[VP] TTS speaking: Opening transfer.");
-          const flow = getFlow("transfer");
-          const newConv = { type: "transfer", stepIndex: 0, collected: {} };
-          setConvFlow(newConv);
-          convFlowRef.current = newConv;
-          await speak(flow[0].question);
-        });
-      case INTENTS.NAVIGATE_AIRTIME:
-        navigate("airtime");
-        return speak("Opening airtime.").then(async () => {
-          console.log("[VP] TTS speaking: Opening airtime.");
-          const flow = getFlow("airtime");
-          const newConv = { type: "airtime", stepIndex: 0, collected: {} };
-          setConvFlow(newConv);
-          convFlowRef.current = newConv;
-          await speak(flow[0].question);
-        });
-      case INTENTS.NAVIGATE_DATA:
-        navigate("data");
-        return speak("Opening data.").then(async () => {
-          console.log("[VP] TTS speaking: Opening data.");
-          const flow = getFlow("data");
-          const newConv = { type: "data", stepIndex: 0, collected: {} };
-          setConvFlow(newConv);
-          convFlowRef.current = newConv;
-          await speak(flow[0].question);
-        });
-      case INTENTS.NAVIGATE_BILLS:
-        navigate("bills");
-        return speak("Opening bills.");
-      case INTENTS.NAVIGATE_HISTORY:
-        navigate("history");
-        return speak("Here are your recent transactions.");
-      case INTENTS.NAVIGATE_SETTINGS:
-        navigate("settings");
-        return speak("Opening settings. Say English, Yoruba, or Pidgin to change your voice language.");
-      case INTENTS.NAVIGATE_HOME:
-        navigate("home");
-        return speak("You are on the dashboard.");
-      case INTENTS.REVEAL_BALANCE:
-        setRevealBalance(true);
-        navigate("home");
-        return speak("Your balance is two hundred and forty seven thousand, five hundred naira.");
-      case INTENTS.RESTART_LISTENING:
-        // Explicit user request to wake the mic, so it fires even if a
-        // manual stop had disabled auto-restart.
-        autoRestartEnabledRef.current = true;
-        return speak("I am listening.");
-      case INTENTS.CONFIRM_TRANSFER: {
-        if (currentScreenRef.current === "transfer") {
-          const d = transferDetailsRef.current;
-          if (d.amount && d.bank) {
-            console.log("[VP] Transfer details collected:", d);
-            setTransferDetails({});
-            transferDetailsRef.current = {};
-            navigate("home");
-            return speak(
-              `Transfer of ${formatAmount(d.amount)} to ${d.recipient_name} was successful. Returning to dashboard.`
-            );
-          }
-        }
-        if (currentScreenRef.current === "data" || currentScreenRef.current === "airtime") {
-          const d = dataDetailsRef.current;
-          if (d.amount && d.network && d.phone) {
-            console.log("[VP] Transfer details collected:", d);
-            setDataDetails({});
-            dataDetailsRef.current = {};
-            navigate("home");
-            return speak("Purchase confirmed. Returning to dashboard.");
-          }
-        }
-        return Promise.resolve();
-      }
-      case INTENTS.CANCEL:
+  const resetConversation = () => {
+    setCurrentStep(null);
+    setCollectedData({});
+    currentStepRef.current = null;
+    collectedDataRef.current = {};
+  };
+
+  const handleTransactionComplete = async (screen, data) => {
+    if (screen === "transfer") {
+      const amt = parseFloat(data.amount) || 0;
+      const total = amt + 10;
+      const msg =
+        `To confirm: sending ${formatAmount(amt)} to ${data.recipient_name} at ${data.bank}. ` +
+        `Account number ${data.account_number}. Total debit including fees is ${formatAmount(total)}. ` +
+        "Say confirm to proceed or cancel to go back.";
+      setCurrentStep("awaiting_confirm");
+      currentStepRef.current = "awaiting_confirm";
+      console.log("[VP] TTS speaking:", msg);
+      await speak(msg);
+    } else if (screen === "airtime") {
+      const msg = `Buying ${formatAmount(data.amount)} ${data.network} airtime for ${data.phone}. Say confirm to proceed.`;
+      setCurrentStep("awaiting_confirm");
+      currentStepRef.current = "awaiting_confirm";
+      console.log("[VP] TTS speaking:", msg);
+      await speak(msg);
+    } else if (screen === "data") {
+      const msg = `Buying ${data.network} data for ${data.phone}. Say confirm to proceed.`;
+      setCurrentStep("awaiting_confirm");
+      currentStepRef.current = "awaiting_confirm";
+      console.log("[VP] TTS speaking:", msg);
+      await speak(msg);
+    }
+  };
+
+  const handleConfirm = async (screen, data) => {
+    if (screen === "transfer") {
+      const amt = parseFloat(data.amount) || 0;
+      setTransferDetails(data);
+      transferDetailsRef.current = data;
+      navigate("home");
+      resetConversation();
+      setTransferDetails({});
+      transferDetailsRef.current = {};
+      console.log("[VP] Transfer details collected:", data);
+      await speak(`Transfer of ${formatAmount(amt)} to ${data.recipient_name} was successful. Returning to dashboard.`);
+    } else if (screen === "airtime" || screen === "data") {
+      setDataDetails(data);
+      dataDetailsRef.current = data;
+      navigate("home");
+      resetConversation();
+      setDataDetails({});
+      dataDetailsRef.current = {};
+      console.log("[VP] Purchase details collected:", data);
+      await speak("Purchase confirmed. Returning to dashboard.");
+    }
+  };
+
+  const handleDecision = async (decision, textForLog) => {
+    console.log("[VP] ── AGENT DECISION ──────────");
+    console.log("[VP] Action:", decision.action);
+    console.log("[VP] Full decision:", JSON.stringify(decision));
+
+    switch (decision.action) {
+      case "NAVIGATE": {
+        console.log("[VP] Navigating to:", decision.screen);
+        navigate(decision.screen, textForLog);
+        resetConversation();
         setTransferDetails({});
         setDataDetails({});
         transferDetailsRef.current = {};
         dataDetailsRef.current = {};
-        convFlowRef.current = null;
-        setConvFlow(null);
+
+        if (decision.screen === "transfer") {
+          await speak(
+            "Opening transfer. Which bank? Say a number. 1 for GTBank, 2 for Access Bank, 3 for Zenith, 4 for First Bank, 5 for UBA, 6 for Opay, 7 for PalmPay, 8 for Moniepoint, 9 for Kuda."
+          );
+          setCurrentStep("bank");
+          currentStepRef.current = "bank";
+        } else if (decision.screen === "airtime") {
+          await speak("Buy airtime. Which network? 1 for MTN, 2 for Airtel, 3 for Glo, 4 for 9mobile.");
+          setCurrentStep("network_airtime");
+          currentStepRef.current = "network_airtime";
+        } else if (decision.screen === "data") {
+          await speak("Buy data. Which network? 1 for MTN, 2 for Airtel, 3 for Glo, 4 for 9mobile.");
+          setCurrentStep("network_data");
+          currentStepRef.current = "network_data";
+        } else if (decision.screen === "bills") {
+          await speak("Pay bills. Say electricity, cable TV, water, or internet.");
+        } else if (decision.screen === "history") {
+          await speak("Here are your recent transactions.");
+        } else if (decision.screen === "home") {
+          await speak("Back to dashboard.");
+        } else if (decision.screen === "settings") {
+          await speak("Settings. Say voice language to change your language.");
+        }
+        break;
+      }
+
+      case "COLLECT_FIELD": {
+        if (!decision.valid) {
+          console.log("[VP] Field invalid:", decision.error);
+          await speak(decision.error);
+          break;
+        }
+
+        const newData = { ...collectedDataRef.current, [decision.field]: decision.value };
+        setCollectedData(newData);
+        collectedDataRef.current = newData;
+        console.log("[VP] Field collected:", decision.field, "=", decision.value);
+        console.log("[VP] All data so far:", JSON.stringify(newData));
+
+        const nextPrompt = getNextPrompt(
+          currentStepRef.current,
+          decision.field,
+          decision.value,
+          newData,
+          currentScreenRef.current
+        );
+
+        if (nextPrompt.done) {
+          await handleTransactionComplete(currentScreenRef.current, newData);
+        } else {
+          setCurrentStep(nextPrompt.nextStep);
+          currentStepRef.current = nextPrompt.nextStep;
+          await speak(nextPrompt.prompt);
+        }
+        break;
+      }
+
+      case "CONFIRM":
+        console.log("[VP] Confirmed transaction");
+        await handleConfirm(currentScreenRef.current, collectedDataRef.current);
+        break;
+
+      case "CANCEL":
+        console.log("[VP] Cancelled, going home");
+        resetConversation();
+        setTransferDetails({});
+        setDataDetails({});
+        transferDetailsRef.current = {};
+        dataDetailsRef.current = {};
         navigate("home");
-        return speak("Cancelled. Returning to dashboard.");
+        await speak("Cancelled. Back to dashboard.");
+        break;
+
+      case "REVEAL_BALANCE":
+        setRevealBalance(true);
+        await speak("Your balance is two hundred and forty seven thousand, five hundred naira.");
+        break;
+
+      case "RESTART_MIC":
+        // Explicit user request to wake the mic, so it fires even if a
+        // manual stop had disabled auto-restart.
+        autoRestartEnabledRef.current = true;
+        await speak("I am listening.");
+        break;
+
+      case "UNKNOWN":
       default:
-        console.log("[VP] Error: unrecognised intent");
-        return Promise.resolve();
+        console.log("[VP] Unknown intent, suggestion:", decision.suggestion);
+        await speak("I did not understand that. " + getContextualHelp(currentScreenRef.current, currentStepRef.current));
+        break;
     }
   };
 
   const { isListening, transcript, error, startListening, stopListening } = useVoiceCommand({
     onTranscript: async (text) => {
-      console.log("[VP] Voice command received:", text);
+      console.log("[VP] ── TRANSCRIPT ──────────────");
+      console.log("[VP] Text:", text);
+      console.log("[VP] Screen:", currentScreenRef.current);
+      console.log("[VP] Step:", currentStepRef.current);
+      console.log("[VP] Collected:", JSON.stringify(collectedDataRef.current));
 
-      if (convFlowRef.current) {
-        const { type, stepIndex, collected } = convFlowRef.current;
-        const flow = getFlow(type);
-        const currentStep = flow[stepIndex];
-
-        console.log("[VP] ── CONVERSATION ─────────────");
-        console.log("[VP] Flow type:", type);
-        console.log("[VP] Step index:", stepIndex);
-        console.log("[VP] Current field:", currentStep.field);
-        console.log("[VP] Raw transcript:", text);
-
-        const cleanValue = currentStep.resolve
-          ? currentStep.resolve(text)
-          : await extractField(currentStep.field, text);
-        console.log("[VP] After Groq clean:", cleanValue);
-
-        const validation = currentStep.validate
-          ? currentStep.validate(cleanValue)
-          : { valid: true, value: cleanValue };
-
-        console.log("[VP] Validation result:", {
-          field: currentStep.field,
-          raw: text,
-          cleaned: cleanValue,
-          valid: validation.valid,
-          stored: validation.value ?? cleanValue,
-          error: validation.error,
-        });
-
-        if (!validation.valid) {
-          console.log("[VP] Validation failed, repeating question");
-          console.log("[VP] TTS speaking:", validation.error);
-          await speak(validation.error);
-          if (isMountedRef.current && autoRestartEnabledRef.current) {
-            console.log("[VP] Mic started");
-            startListeningRef.current?.();
-          }
-          return;
-        }
-
-        const storedValue = validation.value ?? cleanValue;
-        console.log("[VP] After validation:", storedValue);
-
-        const newCollected = { ...collected, [currentStep.field]: storedValue };
-        console.log("[VP] Collected so far:", newCollected);
-        if (currentStep.field === "recipient_name") {
-          console.log("[VP] Recipient name collected:", storedValue);
-        }
-        const nextIndex = stepIndex + 1;
-
-        if (nextIndex < flow.length) {
-          // More questions to ask
-          const updated = { type, stepIndex: nextIndex, collected: newCollected };
-          setConvFlow(updated);
-          convFlowRef.current = updated;
-
-          const confirmText = currentStep.confirm(storedValue);
-          const nextPrompt = `${confirmText} ${flow[nextIndex].question}`;
-          console.log("[VP] TTS speaking:", nextPrompt);
-          await speak(nextPrompt);
-        } else {
-          // All fields collected, read back the full summary
-          convFlowRef.current = null;
-          setConvFlow(null);
-
-          if (type === "transfer") {
-            setTransferDetails(newCollected);
-            transferDetailsRef.current = newCollected;
-            console.log("[VP] ── TRANSFER COMPLETE ───────");
-            console.log("[VP] Full transfer details:", newCollected);
-            const amountLabel = formatAmount(newCollected.amount);
-            const totalLabel = formatAmount((Number(newCollected.amount) || 0) + 10);
-            const summary = `You are sending ${amountLabel} to ${newCollected.recipient_name} at ${newCollected.bank}. Fee is ₦10. Total debit is ${totalLabel}. Say confirm to proceed or cancel to go back.`;
-            console.log("[VP] TTS speaking:", summary);
-            await speak(summary);
-          } else {
-            setDataDetails(newCollected);
-            dataDetailsRef.current = newCollected;
-            console.log("[VP] ── TRANSFER COMPLETE ───────");
-            console.log("[VP] Details:", JSON.stringify(newCollected));
-            const amountLabel = formatAmount(newCollected.amount);
-            const summary = `To confirm: buying ${amountLabel} ${newCollected.network} for ${newCollected.phone}. Say confirm to proceed or cancel to go back.`;
-            console.log("[VP] TTS speaking:", summary);
-            await speak(summary);
-          }
-        }
-
-        if (isMountedRef.current && autoRestartEnabledRef.current) {
-          console.log("[VP] Mic started");
-          startListeningRef.current?.();
-        }
-        return; // skip intent parsing while a conversation is active
-      }
-
-      console.log("[VP] ── INTENT ──────────────────");
-      console.log("[VP] Raw transcript:", text);
-      const intent = parseIntent(text);
-      console.log("[VP] Parsed intent:", intent);
-      console.log("[VP] Active conversation:", !!convFlowRef.current);
-      handleIntent(intent).then(() => {
-        // speak() only resolves once its audio has finished playing, so
-        // starting the mic right here (no artificial delay) can't pick up
-        // the tail of the TTS feedback.
-        if (isMountedRef.current && autoRestartEnabledRef.current) {
-          console.log("[VP] Mic started");
-          startListeningRef.current?.();
-        }
+      const decision = await processCommand(text, {
+        currentScreen: currentScreenRef.current,
+        conversationStep: currentStepRef.current,
+        collectedData: collectedDataRef.current,
+        availableActions: getAvailableActions(currentScreenRef.current),
       });
+
+      await handleDecision(decision, text);
+      restartMic();
     },
   });
 
