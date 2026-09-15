@@ -14,7 +14,7 @@ const initials = (name) =>
     .slice(0, 2)
     .toUpperCase();
 
-export default function Transfer({ navigate, details }) {
+export default function Transfer({ navigate, details, voiceStep, voiceData }) {
   const [step, setStep] = useState(1);
   const [bank, setBank] = useState("");
   const [showBankSheet, setShowBankSheet] = useState(false);
@@ -40,8 +40,30 @@ export default function Transfer({ navigate, details }) {
     if (details.narration && !/skip/i.test(details.narration)) setNarration(details.narration);
   }, [details]);
 
+  // The voice conversation flow (App.jsx) collects fields independently of
+  // this component's own step state, so mirror its progress here: sync the
+  // visual step and pre-fill whatever fields it has collected so far.
   useEffect(() => {
-    if (details?.recipient_name) return;
+    if (voiceStep != null) setStep(voiceStep);
+  }, [voiceStep]);
+
+  useEffect(() => {
+    if (!voiceData) return;
+    if (voiceData.bank) {
+      const match = NIGERIAN_BANKS.find((b) => b.toLowerCase().includes(String(voiceData.bank).toLowerCase()));
+      setBank(match || voiceData.bank);
+    }
+    if (voiceData.account_number) {
+      setAccountNumber(String(voiceData.account_number).replace(/\D/g, ""));
+      setAccountName(MOCK_ACCOUNT_NAME);
+    }
+    if (voiceData.recipient_name) setAccountName(voiceData.recipient_name);
+    if (voiceData.amount != null) setAmount(String(voiceData.amount).replace(/\D/g, ""));
+    if (voiceData.narration && !/skip/i.test(voiceData.narration)) setNarration(voiceData.narration);
+  }, [voiceData]);
+
+  useEffect(() => {
+    if (details?.recipient_name || voiceData?.account_number || voiceData?.recipient_name) return;
     if (accountNumber.length === 10) {
       setLookingUp(true);
       setAccountName("");
@@ -54,7 +76,7 @@ export default function Transfer({ navigate, details }) {
     } else {
       setAccountName("");
     }
-  }, [accountNumber, bank, details]);
+  }, [accountNumber, bank, details, voiceData]);
 
   const handleBack = () => {
     console.log("[VP] Navigating to: home");

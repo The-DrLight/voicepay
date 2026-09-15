@@ -107,6 +107,7 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState("home");
   const [currentStep, setCurrentStep] = useState(null);
   const [collectedData, setCollectedData] = useState({});
+  const [transferStep, setTransferStep] = useState(1);
   const [revealBalance, setRevealBalance] = useState(false);
   const [transferDetails, setTransferDetails] = useState({});
   const [dataDetails, setDataDetails] = useState({});
@@ -181,6 +182,7 @@ export default function App() {
   const resetConversation = () => {
     setCurrentStep(null);
     setCollectedData({});
+    setTransferStep(1);
     currentStepRef.current = null;
     collectedDataRef.current = {};
   };
@@ -195,6 +197,7 @@ export default function App() {
         "Say confirm to proceed or cancel to go back.";
       setCurrentStep("awaiting_confirm");
       currentStepRef.current = "awaiting_confirm";
+      setTransferStep(3);
       log.info("APP", "TTS speaking", { text: msg });
       await speak(msg);
     } else if (screen === "airtime") {
@@ -284,6 +287,14 @@ export default function App() {
         setCollectedData(newData);
         collectedDataRef.current = newData;
         log.info("APP", "Field collected", { field: decision.field, value: decision.value, allData: newData });
+
+        if (currentScreenRef.current === "transfer") {
+          if (decision.field === "bank" || decision.field === "account_number" || decision.field === "recipient_name") {
+            setTransferStep(2);
+          } else if (decision.field === "amount") {
+            setTransferStep(3);
+          }
+        }
 
         const nextPrompt = getNextPrompt(
           currentStepRef.current,
@@ -397,7 +408,14 @@ export default function App() {
   const renderScreen = () => {
     switch (currentScreen) {
       case "transfer":
-        return <Transfer navigate={navigate} details={transferDetails} />;
+        return (
+          <Transfer
+            navigate={navigate}
+            details={transferDetails}
+            voiceStep={transferStep}
+            voiceData={collectedData}
+          />
+        );
       case "airtime":
         return <Airtime navigate={navigate} details={dataDetails} />;
       case "data":

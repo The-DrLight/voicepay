@@ -13,6 +13,11 @@ export function useVoiceCommand({ onTranscript } = {}) {
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
+  // The browser can fire onend before a final result ever arrives (e.g. the
+  // user trails off instead of pausing cleanly), which would otherwise drop
+  // the whole utterance. Track the latest interim result so onend can use it
+  // as a fallback "final" transcript.
+  const lastPartialRef = useRef("");
 
   const startListening = useCallback(() => {
     if (!SpeechRecognition) {
@@ -32,6 +37,7 @@ export function useVoiceCommand({ onTranscript } = {}) {
       setIsListening(true);
       setTranscript("");
       setError(null);
+      lastPartialRef.current = "";
     };
 
     recognition.onresult = (event) => {
@@ -48,11 +54,13 @@ export function useVoiceCommand({ onTranscript } = {}) {
       }
 
       if (interimTranscript) {
+        lastPartialRef.current = interimTranscript;
         log.info("STT", "Partial transcript", { text: interimTranscript });
         setTranscript(interimTranscript);
       }
 
       if (finalTranscript) {
+        lastPartialRef.current = "";
         log.info("STT", "Final transcript", { text: finalTranscript });
         setTranscript(finalTranscript);
         setIsListening(false);
@@ -62,15 +70,32 @@ export function useVoiceCommand({ onTranscript } = {}) {
 
     recognition.onerror = (event) => {
       log.error("STT", "Recognition error", { error: event.error });
-      if (event.error !== "no-speech" && event.error !== "aborted") {
+      setIsListening(false);
+
+      // On no-speech, restart automatically instead of surfacing an error.
+      if (event.error === "no-speech") {
+        log.info("STT", "No speech detected, restarting");
+        setTimeout(() => startListening(), 500);
+        return;
+      }
+
+      if (event.error !== "aborted") {
         setError(event.error);
       }
-      setIsListening(false);
     };
 
     recognition.onend = () => {
       log.info("STT", "Recognition ended");
       setIsListening(false);
+
+      // If we have a partial but never got a final result, use the partial
+      // as the transcript so the utterance isn't silently dropped.
+      if (lastPartialRef.current && lastPartialRef.current.trim().length > 0) {
+        const text = lastPartialRef.current;
+        lastPartialRef.current = "";
+        log.info("STT", "Using last partial as final", { text });
+        onTranscript?.(text);
+      }
     };
 
     recognitionRef.current = recognition;
