@@ -12,7 +12,33 @@ const INTRON_KEY = process.env.VITE_INTRON_API_KEY
 const GROQ_KEY = process.env.GROQ_API_KEY
 
 app.use(express.json())
+
+app.use((req, res, next) => {
+  if (req.path !== '/log') { // don't log log calls
+    console.log(`[REQUEST] ${req.method} ${req.path}`)
+  }
+  next()
+})
+
 app.use(express.static(path.join(__dirname, 'dist')))
+
+// Client-side event log, forwarded here so it shows up in Render logs
+app.post('/log', (req, res) => {
+  const { level, tag, message, data } = req.body
+  const timestamp = new Date().toISOString()
+  const dataStr = data ?
+    '\n  DATA: ' + JSON.stringify(data, null, 2) : ''
+
+  const line = `[${timestamp}] [${tag}] ${message}${dataStr}`
+
+  if (level === 'error') {
+    console.error(line)
+  } else {
+    console.log(line)
+  }
+
+  res.json({ ok: true })
+})
 
 // TTS Generate - direct fetch, no proxy middleware
 app.post('/tts-generate', async (req, res) => {

@@ -1,3 +1,5 @@
+import { log } from "./logger.js";
+
 const SYSTEM_PROMPT = (context) => `You are VoicePay, an AI banking
 assistant for visually impaired users in Nigeria.
 You understand English, Yoruba-English, and Nigerian
@@ -80,8 +82,7 @@ function quickParse(text, screen) {
 }
 
 export async function processCommand(transcript, context) {
-  console.log("[AGENT] Processing:", transcript);
-  console.log("[AGENT] Context:", JSON.stringify(context));
+  log.info("AGENT", "Processing transcript", { transcript, screen: context.currentScreen });
 
   // Only short-circuit outside an in-progress conversation step, so field
   // collection (which can legitimately contain words like "cancel" as a
@@ -89,7 +90,7 @@ export async function processCommand(transcript, context) {
   if (!context.conversationStep) {
     const quickCheck = quickParse(transcript, context.currentScreen);
     if (quickCheck) {
-      console.log("[AGENT] Quick parse hit:", quickCheck);
+      log.info("AGENT", "Quick parse matched", quickCheck);
       return quickCheck;
     }
   }
@@ -113,22 +114,20 @@ export async function processCommand(transcript, context) {
     });
 
     const data = await response.json();
-    console.log("[AGENT] Groq raw response:", JSON.stringify(data));
 
     if (data.error) {
-      console.error("[AGENT] Groq error:", data.error);
+      log.error("AGENT", "Groq API error", data.error);
       return { action: "UNKNOWN", suggestion: "API error" };
     }
 
     const rawContent = data.choices[0].message.content;
-    console.log("[AGENT] Raw content string:", rawContent);
+    log.info("AGENT", "Groq raw response", { content: rawContent });
 
     let result;
     try {
       result = JSON.parse(rawContent);
     } catch (parseErr) {
-      console.error("[AGENT] JSON parse failed:", parseErr.message);
-      console.error("[AGENT] Content was:", rawContent);
+      log.error("AGENT", "JSON parse failed", { error: parseErr.message, content: rawContent });
       // Try to extract action manually
       if (rawContent.includes("NAVIGATE")) {
         const screenMatch = rawContent.match(/"screen":\s*"(\w+)"/);
@@ -138,10 +137,10 @@ export async function processCommand(transcript, context) {
       }
     }
 
-    console.log("[AGENT] Decision:", JSON.stringify(result));
+    log.info("AGENT", "Decision made", result);
     return result;
   } catch (err) {
-    console.error("[AGENT] Failed:", err.message);
+    log.error("AGENT", "Processing failed", { error: err.message });
     return { action: "UNKNOWN", suggestion: err.message };
   }
 }

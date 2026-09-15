@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { log } from "../utils/logger.js";
 
 // Points at Vite's dev-server WebSocket proxy (vite.config.js), which injects
 // the Authorization header server-side since browsers can't set it on a WS handshake.
@@ -126,14 +127,9 @@ export function useVoiceCommand({ onTranscript } = {}) {
             silenceStartRef.current = Date.now();
           } else {
             const silenceDuration = Date.now() - silenceStartRef.current;
-            console.log(
-              "[VP] Silence detected, RMS:",
-              rms.toFixed(4),
-              "duration:",
-              silenceDuration,
-              "ms"
-            );
             if (silenceDuration > SILENCE_DURATION_MS) {
+              log.info("STT", "Silence detected", { rms: rms.toFixed(4), duration: silenceDuration });
+              log.info("STT", "Auto-stopping on silence");
               silenceStartRef.current = null;
               stopListeningRef.current?.();
             }
@@ -159,6 +155,7 @@ export function useVoiceCommand({ onTranscript } = {}) {
       num_channels: "1",
     });
 
+    log.info("STT", "Connecting to WebSocket");
     const ws = new WebSocket(`${STT_ENDPOINT}?${params.toString()}`);
     wsRef.current = ws;
 
@@ -172,6 +169,10 @@ export function useVoiceCommand({ onTranscript } = {}) {
 
       switch (message.message_type) {
         case "SESSION_CREATED":
+          log.info("STT", "Session created", {
+            sessionId: message.session_id,
+            balance: message.credit_balance,
+          });
           sessionReadyRef.current = true;
           startAudioCapture().catch((err) => {
             setError(err.message || "Microphone access failed.");
@@ -182,13 +183,17 @@ export function useVoiceCommand({ onTranscript } = {}) {
 
         case "PARTIAL_TRANSCRIPT": {
           const partial = message.transcript ?? message.data?.transcript ?? "";
-          console.log("[STT] Partial:", partial);
+          log.info("STT", "Partial transcript", { text: partial });
           setTranscript(partial);
           break;
         }
 
         case "COMMITTED_TRANSCRIPT": {
           const finalTranscript = message.transcript_text ?? message.data?.transcript ?? "";
+          log.info("STT", "Final transcript", {
+            text: finalTranscript,
+            duration: message.audio_len,
+          });
           setTranscript(finalTranscript);
           onTranscript?.(finalTranscript);
           ws.close();
@@ -198,6 +203,11 @@ export function useVoiceCommand({ onTranscript } = {}) {
         case "AUTHENTICATION_ERROR":
         case "QUOTA_EXCEEDED":
         case "SESSION_TIME_LIMIT_EXCEEDED":
+          if (message.message_type === "AUTHENTICATION_ERROR") {
+            log.error("STT", "Auth failed");
+          } else {
+            log.error("STT", "Session error", { type: message.message_type });
+          }
           setError(ERROR_MESSAGES[message.message_type]);
           cleanupAudio();
           ws.close();
@@ -209,6 +219,7 @@ export function useVoiceCommand({ onTranscript } = {}) {
     };
 
     ws.onerror = () => {
+      log.error("STT", "WebSocket error", { message: "Voice connection error." });
       setError("Voice connection error.");
     };
 
@@ -222,6 +233,7 @@ export function useVoiceCommand({ onTranscript } = {}) {
 
   const stopListening = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      log.info("STT", "Committing session");
       flushAudioBuffer();
       cleanupAudio();
       wsRef.current.send(JSON.stringify({ message_type: "COMMIT" }));

@@ -1,3 +1,5 @@
+import { log } from './logger.js'
+
 let ttsConfig = {
   voice_language: 'en',
   voice_accent: 'yoruba',
@@ -11,13 +13,13 @@ export function setTTSConfig(config) {
 let queue = Promise.resolve()
 
 export function speak(text) {
-  console.log('[TTS] Queuing:', text.substring(0, 50))
+  log.info('TTS', 'Queuing', { text: text.substring(0, 60) })
   queue = queue.then(() => generateAndPlay(text))
   return queue
 }
 
 async function generateAndPlay(text) {
-  console.log('[TTS] Generating audio for:', text.substring(0, 50))
+  log.info('TTS', 'Generating audio', { text: text.substring(0, 60), config: ttsConfig })
   try {
     const response = await fetch('/tts-generate', {
       method: 'POST',
@@ -31,38 +33,38 @@ async function generateAndPlay(text) {
     })
 
     if (!response.ok) {
-      console.error('[TTS] HTTP error:', response.status)
+      log.error('TTS', 'Generate failed', { status: response.status })
       return
     }
 
     const data = await response.json()
-    console.log('[TTS] Response:', data?.data?.processing_status)
+    log.info('TTS', 'Response received', { status: data?.data?.processing_status })
 
     const audioPath = data?.data?.audio_path
     if (!audioPath) {
-      console.error('[TTS] No audio path in response:', data)
+      log.error('TTS', 'No audio path in response', data)
       return
     }
 
-    console.log('[TTS] Playing:', audioPath)
+    log.info('TTS', 'Playing audio', { url: audioPath })
     const audio = new Audio(audioPath)
 
     await new Promise((resolve) => {
       audio.onended = () => {
-        console.log('[TTS] Playback complete')
+        log.info('TTS', 'Playback complete')
         resolve()
       }
       audio.onerror = (e) => {
-        console.error('[TTS] Playback error:', e)
+        log.error('TTS', 'Playback error', { error: e?.message || String(e) })
         resolve()
       }
       audio.play().catch((e) => {
-        console.error('[TTS] Play() rejected:', e)
+        log.error('TTS', 'Play() rejected', { error: e.message })
         resolve()
       })
     })
 
   } catch (err) {
-    console.error('[TTS] generateAndPlay error:', err.message)
+    log.error('TTS', 'generateAndPlay error', { error: err.message })
   }
 }

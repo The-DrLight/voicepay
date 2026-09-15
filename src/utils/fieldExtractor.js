@@ -1,3 +1,5 @@
+import { log } from "./logger.js";
+
 const PROMPTS = {
   bank: (transcript) => `Extract only the bank name from this text.
       Return ONLY the bank name, nothing else.
@@ -57,8 +59,7 @@ const PROMPTS = {
 };
 
 async function callGroq(field, prompt) {
-  console.log("[GROQ] Calling for field:", field);
-  console.log("[GROQ] Prompt:", prompt);
+  log.info("GROQ", "Calling Groq", { field, prompt: prompt.substring(0, 120) });
 
   try {
     const response = await fetch("/ai-extract", {
@@ -73,18 +74,18 @@ async function callGroq(field, prompt) {
     });
 
     const data = await response.json();
-    console.log("[GROQ] Raw response:", JSON.stringify(data));
+    log.info("GROQ", "Raw response", { content: JSON.stringify(data) });
 
     if (data.error) {
-      console.error("[GROQ] API error:", data.error);
+      log.error("GROQ", "API error", data.error);
       return null;
     }
 
     const result = data.choices?.[0]?.message?.content?.trim();
-    console.log("[GROQ] Extracted result:", result);
+    log.info("GROQ", "Extracted value", { field, result });
     return result || null;
   } catch (err) {
-    console.error("[GROQ] Fetch error:", err.message);
+    log.error("GROQ", "Fetch error", { error: err.message });
     return null;
   }
 }
@@ -95,7 +96,7 @@ export async function extractField(field, transcript) {
 
   const result = await callGroq(field, prompt);
   if (!result) {
-    console.warn("[GROQ] No result, using raw transcript");
+    log.warn("GROQ", "No result, using raw", { transcript });
     return transcript;
   }
   return result;

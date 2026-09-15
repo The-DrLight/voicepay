@@ -14,6 +14,7 @@ import AppHeader from "./components/AppHeader";
 import { useVoiceCommand } from "./hooks/useVoiceCommand";
 import { processCommand } from "./utils/voiceAgent";
 import { speak } from "./utils/ttsService";
+import { log } from "./utils/logger.js";
 
 const SCREEN_NAMES = {
   home: "Dashboard",
@@ -129,7 +130,7 @@ export default function App() {
   const dataDetailsRef = useRef(dataDetails);
 
   useEffect(() => {
-    console.log("[VP] App mounted");
+    log.info("APP", "App mounted");
   }, []);
 
   useEffect(() => {
@@ -153,15 +154,16 @@ export default function App() {
   }, [dataDetails]);
 
   const navigate = (screen, triggeredBy) => {
-    console.log("[VP] ── NAVIGATE ──────────────────");
-    console.log("[VP] From:", currentScreenRef.current);
-    console.log("[VP] To:", screen);
-    console.log("[VP] Triggered by:", triggeredBy ?? "(programmatic)");
+    log.info("APP", "Navigating", {
+      to: screen,
+      from: currentScreenRef.current,
+      trigger: triggeredBy ?? "(programmatic)",
+    });
     setCurrentScreen(screen);
   };
 
   const handleNavigate = (screen) => {
-    console.log("[VP] Manual navigation to:", screen);
+    log.info("APP", "Manual navigation to", { screen });
     navigate(screen, "tap");
     setCurrentStep(null);
     setCollectedData({});
@@ -171,7 +173,7 @@ export default function App() {
 
   const restartMic = () => {
     if (isMountedRef.current && autoRestartEnabledRef.current) {
-      console.log("[VP] Mic started");
+      log.info("APP", "Mic started");
       startListeningRef.current?.();
     }
   };
@@ -193,24 +195,26 @@ export default function App() {
         "Say confirm to proceed or cancel to go back.";
       setCurrentStep("awaiting_confirm");
       currentStepRef.current = "awaiting_confirm";
-      console.log("[VP] TTS speaking:", msg);
+      log.info("APP", "TTS speaking", { text: msg });
       await speak(msg);
     } else if (screen === "airtime") {
       const msg = `Buying ${formatAmount(data.amount)} ${data.network} airtime for ${data.phone}. Say confirm to proceed.`;
       setCurrentStep("awaiting_confirm");
       currentStepRef.current = "awaiting_confirm";
-      console.log("[VP] TTS speaking:", msg);
+      log.info("APP", "TTS speaking", { text: msg });
       await speak(msg);
     } else if (screen === "data") {
       const msg = `Buying ${data.network} data for ${data.phone}. Say confirm to proceed.`;
       setCurrentStep("awaiting_confirm");
       currentStepRef.current = "awaiting_confirm";
-      console.log("[VP] TTS speaking:", msg);
+      log.info("APP", "TTS speaking", { text: msg });
       await speak(msg);
     }
+    log.info("APP", "Transaction complete", data);
   };
 
   const handleConfirm = async (screen, data) => {
+    log.info("APP", "Confirmed", { screen, data });
     if (screen === "transfer") {
       const amt = parseFloat(data.amount) || 0;
       setTransferDetails(data);
@@ -219,7 +223,6 @@ export default function App() {
       resetConversation();
       setTransferDetails({});
       transferDetailsRef.current = {};
-      console.log("[VP] Transfer details collected:", data);
       await speak(`Transfer of ${formatAmount(amt)} to ${data.recipient_name} was successful. Returning to dashboard.`);
     } else if (screen === "airtime" || screen === "data") {
       setDataDetails(data);
@@ -228,19 +231,15 @@ export default function App() {
       resetConversation();
       setDataDetails({});
       dataDetailsRef.current = {};
-      console.log("[VP] Purchase details collected:", data);
       await speak("Purchase confirmed. Returning to dashboard.");
     }
   };
 
   const handleDecision = async (decision, textForLog) => {
-    console.log("[VP] ── AGENT DECISION ──────────");
-    console.log("[VP] Action:", decision.action);
-    console.log("[VP] Full decision:", JSON.stringify(decision));
+    log.info("APP", "Agent decision", decision);
 
     switch (decision.action) {
       case "NAVIGATE": {
-        console.log("[VP] Navigating to:", decision.screen);
         navigate(decision.screen, textForLog);
         resetConversation();
         setTransferDetails({});
@@ -276,7 +275,7 @@ export default function App() {
 
       case "COLLECT_FIELD": {
         if (!decision.valid) {
-          console.log("[VP] Field invalid:", decision.error);
+          log.warn("APP", "Field invalid", { field: decision.field, error: decision.error });
           await speak(decision.error);
           break;
         }
@@ -284,8 +283,7 @@ export default function App() {
         const newData = { ...collectedDataRef.current, [decision.field]: decision.value };
         setCollectedData(newData);
         collectedDataRef.current = newData;
-        console.log("[VP] Field collected:", decision.field, "=", decision.value);
-        console.log("[VP] All data so far:", JSON.stringify(newData));
+        log.info("APP", "Field collected", { field: decision.field, value: decision.value, allData: newData });
 
         const nextPrompt = getNextPrompt(
           currentStepRef.current,
@@ -306,12 +304,11 @@ export default function App() {
       }
 
       case "CONFIRM":
-        console.log("[VP] Confirmed transaction");
         await handleConfirm(currentScreenRef.current, collectedDataRef.current);
         break;
 
       case "CANCEL":
-        console.log("[VP] Cancelled, going home");
+        log.info("APP", "Cancelled");
         resetConversation();
         setTransferDetails({});
         setDataDetails({});
@@ -335,7 +332,7 @@ export default function App() {
 
       case "UNKNOWN":
       default:
-        console.log("[VP] Unknown intent, suggestion:", decision.suggestion);
+        log.error("APP", "Unrecognised intent", { transcript: textForLog, decision });
         await speak("I did not understand that. " + getContextualHelp(currentScreenRef.current, currentStepRef.current));
         break;
     }
@@ -343,11 +340,7 @@ export default function App() {
 
   const { isListening, transcript, error, startListening, stopListening } = useVoiceCommand({
     onTranscript: async (text) => {
-      console.log("[VP] ── TRANSCRIPT ──────────────");
-      console.log("[VP] Text:", text);
-      console.log("[VP] Screen:", currentScreenRef.current);
-      console.log("[VP] Step:", currentStepRef.current);
-      console.log("[VP] Collected:", JSON.stringify(collectedDataRef.current));
+      log.info("APP", "Voice command received", { transcript: text });
 
       const decision = await processCommand(text, {
         currentScreen: currentScreenRef.current,
@@ -377,12 +370,13 @@ export default function App() {
     // Browsers block autoplaying audio (and getUserMedia is tied to the same
     // gesture requirement) until a real user interaction happens, so both the
     // welcome speech and the mic can only be kicked off from this click handler.
+    log.info("APP", "Splash tapped");
     const welcome =
       "Welcome back Amara. You can say: send money, buy airtime, buy data, pay bills, check balance, check history, or open settings.";
-    console.log("[VP] TTS speaking:", welcome);
+    log.info("APP", "TTS speaking", { text: welcome });
     await speak(welcome);
     if (isMountedRef.current) {
-      console.log("[VP] Mic started");
+      log.info("APP", "Mic started");
       startListening();
     }
   };
@@ -390,11 +384,11 @@ export default function App() {
   const toggleListening = () => {
     if (isListening) {
       autoRestartEnabledRef.current = false;
-      console.log("[VP] Mic stopped, reason: manual");
+      log.info("APP", "Mic stopped", { reason: "manual" });
       stopListening();
     } else {
       autoRestartEnabledRef.current = true;
-      console.log("[VP] Mic started");
+      log.info("APP", "Mic started");
       startListening();
       speak("Listening for your command.");
     }
