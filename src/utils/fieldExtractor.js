@@ -33,6 +33,10 @@ const PROMPTS = {
       Text: "${transcript}"
       Return only the number:`,
 
+  recipient_name: (transcript) => `Extract only the person's full name from
+      this text. Return ONLY the name, nothing else.
+      Text: "${transcript}"`,
+
   narration: (transcript) => `Extract the narration/note/description
       from this text, or return "none" if the person
       said skip or nothing relevant.

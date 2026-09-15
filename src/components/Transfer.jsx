@@ -35,11 +35,13 @@ export default function Transfer({ navigate, details }) {
       setBank(match || details.bank);
     }
     if (details.account_number) setAccountNumber(String(details.account_number).replace(/\D/g, ""));
+    if (details.recipient_name) setAccountName(details.recipient_name);
     if (details.amount != null) setAmount(String(details.amount).replace(/\D/g, ""));
     if (details.narration && !/skip/i.test(details.narration)) setNarration(details.narration);
   }, [details]);
 
   useEffect(() => {
+    if (details?.recipient_name) return;
     if (accountNumber.length === 10) {
       setLookingUp(true);
       setAccountName("");
@@ -52,7 +54,7 @@ export default function Transfer({ navigate, details }) {
     } else {
       setAccountName("");
     }
-  }, [accountNumber, bank]);
+  }, [accountNumber, bank, details]);
 
   const handleBack = () => {
     console.log("[VP] Navigating to: home");

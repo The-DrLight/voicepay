@@ -110,7 +110,7 @@ const flows = {
     {
       field: "account_number",
       question: "What is the 10-digit account number? Say each digit clearly.",
-      confirm: (v) => `Account number ${v}. Account name is Daniel Olorunda.`,
+      confirm: (v) => `Account number ${v} saved.`,
       validate: (value) => {
         const digits = (value || "").replace(/\D/g, "");
         const valid = digits.length === 10;
@@ -120,6 +120,22 @@ const flows = {
           error: valid
             ? null
             : `I heard ${digits.length} digits. Please say all 10 digits of the account number.`,
+        };
+      },
+    },
+    {
+      field: "recipient_name",
+      question: "What is the recipient name?",
+      confirm: (v) => `Got it, sending to ${v}.`,
+      validate: (value) => {
+        const clean = (value || "").trim();
+        const valid = clean.length >= 2 && !clean.match(/^\d+$/);
+        return {
+          valid,
+          value: clean,
+          error: valid
+            ? null
+            : "I did not catch the name. Please say the recipient full name clearly.",
         };
       },
     },

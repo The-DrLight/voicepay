@@ -144,7 +144,9 @@ export default function App() {
             setTransferDetails({});
             transferDetailsRef.current = {};
             navigate("home");
-            return speak("Transfer confirmed. Returning to dashboard.");
+            return speak(
+              `Transfer of ${formatAmount(d.amount)} to ${d.recipient_name} was successful. Returning to dashboard.`
+            );
           }
         }
         if (currentScreenRef.current === "data" || currentScreenRef.current === "airtime") {
@@ -223,6 +225,9 @@ export default function App() {
 
         const newCollected = { ...collected, [currentStep.field]: storedValue };
         console.log("[VP] Collected so far:", newCollected);
+        if (currentStep.field === "recipient_name") {
+          console.log("[VP] Recipient name collected:", storedValue);
+        }
         const nextIndex = stepIndex + 1;
 
         if (nextIndex < flow.length) {
@@ -244,10 +249,10 @@ export default function App() {
             setTransferDetails(newCollected);
             transferDetailsRef.current = newCollected;
             console.log("[VP] ── TRANSFER COMPLETE ───────");
-            console.log("[VP] Details:", JSON.stringify(newCollected));
+            console.log("[VP] Full transfer details:", newCollected);
             const amountLabel = formatAmount(newCollected.amount);
             const totalLabel = formatAmount((Number(newCollected.amount) || 0) + 10);
-            const summary = `You are sending ${amountLabel} to Daniel Olorunda at ${newCollected.bank}. Total debit including fees is ${totalLabel}. Say confirm to proceed or cancel to go back.`;
+            const summary = `You are sending ${amountLabel} to ${newCollected.recipient_name} at ${newCollected.bank}. Fee is ₦10. Total debit is ${totalLabel}. Say confirm to proceed or cancel to go back.`;
             console.log("[VP] TTS speaking:", summary);
             await speak(summary);
           } else {
