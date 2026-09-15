@@ -60,12 +60,38 @@ function playBuffer(audioCtx, buffer) {
   });
 }
 
+async function playViaFallback(fullText) {
+  console.warn("[TTS] Streaming returned no audio, falling back to TTS Generate");
+  const res = await fetch("/tts-generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: fullText,
+      voice_language: ttsConfig.voice_language,
+      voice_accent: ttsConfig.voice_accent,
+      voice_gender: ttsConfig.voice_gender,
+    }),
+  });
+  const data = await res.json();
+  if (data?.data?.audio_path) {
+    console.log("[TTS] Fallback playing:", data.data.audio_path);
+    const audio = new Audio(data.data.audio_path);
+    await new Promise((resolve) => {
+      audio.onended = resolve;
+      audio.onerror = resolve; // resolve anyway on error
+      audio.play().catch(resolve);
+    });
+  }
+}
+
 async function streamAndPlay(text) {
-  const chunks = splitIntoChunks(text, MAX_CHUNK_CHARS);
+  const fullText = text;
+  const chunks = splitIntoChunks(fullText, MAX_CHUNK_CHARS);
   const audioCtx = getAudioContext();
   if (audioCtx.state === "suspended") {
     await audioCtx.resume().catch(() => {});
   }
+  let audioPlayed = false;
 
   // One deferred slot per chunk index so audio plays back in the order the
   // text was split, even if FETCH_AUDIO_CHUNK responses arrive out of order.
@@ -85,7 +111,7 @@ async function streamAndPlay(text) {
   const ws = new WebSocket(`${TTS_STREAM_ENDPOINT}?${params.toString()}`);
   ws.addEventListener("open", () => console.log("[TTS] WS opened"));
 
-  await new Promise((resolve) => {
+  const streamingPromise = new Promise((resolve) => {
     let settled = false;
     let sessionStarted = false;
 
@@ -117,6 +143,7 @@ async function streamAndPlay(text) {
             const buffer = await audioCtx.decodeAudioData(bytes.buffer);
             console.log("[TTS] Decoded audio buffer, duration:", buffer.duration);
             console.log("[TTS] Playing chunk", i);
+            audioPlayed = true;
             await playBuffer(audioCtx, buffer);
             console.log("[TTS] Chunk", i, "finished playing");
           } catch (err) {
@@ -126,6 +153,15 @@ async function streamAndPlay(text) {
       } catch (e) {
         console.error("[TTS] Playback error:", e);
       }
+
+      if (!audioPlayed) {
+        try {
+          await playViaFallback(fullText);
+        } catch (err) {
+          console.error("[TTS] Fallback playback error:", err);
+        }
+      }
+
       finish();
     };
 
@@ -157,9 +193,16 @@ async function streamAndPlay(text) {
           const chunkId = message.chunk_id ?? message.data?.chunk_id ?? message.ack_id;
           const audioBase64 = message.audio_base_64 ?? message.data?.audio_base_64;
           console.log("[TTS] Got audio chunk, base64 length:", audioBase64?.length);
-          if (typeof chunkId === "number" && audioBase64 && pendingChunks[chunkId]) {
-            pendingChunks[chunkId].resolveChunk(audioBase64);
+          if (typeof chunkId !== "number" || !pendingChunks[chunkId]) break;
+
+          if (!audioBase64 || audioBase64.length === 0) {
+            console.warn("[TTS] Empty audio chunk received, skipping:", chunkId);
+            // resolve this chunk's deferred so playback does not hang
+            pendingChunks[chunkId].resolveChunk(null);
+            break;
           }
+
+          pendingChunks[chunkId].resolveChunk(audioBase64);
           break;
         }
 
@@ -189,6 +232,15 @@ async function streamAndPlay(text) {
       }
     };
   });
+
+  const timeoutPromise = new Promise((resolve) =>
+    setTimeout(() => {
+      console.warn("[TTS] Timeout reached, continuing");
+      resolve();
+    }, 15000)
+  );
+
+  await Promise.race([streamingPromise, timeoutPromise]);
 }
 
 let queue = Promise.resolve();
