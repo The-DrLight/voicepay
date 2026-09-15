@@ -1,6 +1,6 @@
 import { USER } from "../utils/mockData";
 
-export default function AppHeader() {
+export default function AppHeader({ onNavigate }) {
   return (
     <header className="app-header">
       <div className="app-header-left">
@@ -9,7 +9,13 @@ export default function AppHeader() {
         </button>
       </div>
 
-      <span className="app-logo">VoicePay</span>
+      <button
+        className="app-logo app-logo-btn"
+        onClick={() => onNavigate?.("home")}
+        aria-label="Go to dashboard"
+      >
+        VoicePay
+      </button>
 
       <div className="app-header-right">
         <button className="app-icon-btn" aria-label="Notifications">

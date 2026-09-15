@@ -180,9 +180,12 @@ export function useVoiceCommand({ onTranscript } = {}) {
           });
           break;
 
-        case "PARTIAL_TRANSCRIPT":
-          setTranscript(message.data?.transcript ?? "");
+        case "PARTIAL_TRANSCRIPT": {
+          const partial = message.transcript ?? message.data?.transcript ?? "";
+          console.log("[STT] Partial:", partial);
+          setTranscript(partial);
           break;
+        }
 
         case "COMMITTED_TRANSCRIPT": {
           const finalTranscript = message.transcript_text ?? message.data?.transcript ?? "";

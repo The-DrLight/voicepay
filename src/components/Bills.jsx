@@ -11,6 +11,7 @@ export default function Bills({ navigate }) {
   const [amount, setAmount] = useState("");
   const [verifiedName, setVerifiedName] = useState("");
   const [verifying, setVerifying] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   const handleBack = () => {
     console.log("[VP] Navigating to: home");
@@ -38,9 +39,25 @@ export default function Bills({ navigate }) {
   };
 
   const handlePay = () => {
+    setSuccess(true);
     speak(`Paying ₦${amount || 0} ${disco} electricity bill.`);
-    navigate("home");
+    setTimeout(() => navigate("home"), 1800);
   };
+
+  if (success) {
+    return (
+      <div className="screen">
+        <div className="success-screen">
+          <span className="success-check" aria-hidden="true">
+            ✓
+          </span>
+          <p className="success-title">Bill Payment Successful!</p>
+          <p className="success-amount">₦{Number(amount || 0).toLocaleString("en-NG")}</p>
+          <p className="success-sub">{disco} electricity bill</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!category) {
     return (

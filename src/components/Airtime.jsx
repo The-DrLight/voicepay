@@ -8,6 +8,7 @@ export default function Airtime({ navigate, details }) {
   const [network, setNetwork] = useState(NETWORKS[0].name);
   const [phone, setPhone] = useState(MY_NUMBER);
   const [amount, setAmount] = useState("");
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     if (!details) return;
@@ -27,9 +28,27 @@ export default function Airtime({ navigate, details }) {
 
   const handleBuy = () => {
     console.log("[VP] Transfer details collected:", { type: "airtime", network, phone, amount });
+    setSuccess(true);
     speak(`Buying ₦${amount || 0} ${network} airtime for ${phone}.`);
-    navigate("home");
+    setTimeout(() => navigate("home"), 1800);
   };
+
+  if (success) {
+    return (
+      <div className="screen">
+        <div className="success-screen">
+          <span className="success-check" aria-hidden="true">
+            ✓
+          </span>
+          <p className="success-title">Airtime Purchase Successful!</p>
+          <p className="success-amount">₦{Number(amount || 0).toLocaleString("en-NG")}</p>
+          <p className="success-sub">
+            {network} airtime for {phone}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="screen">

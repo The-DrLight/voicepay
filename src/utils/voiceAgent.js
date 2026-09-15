@@ -59,9 +59,40 @@ Rules:
 
 Return ONLY a JSON object, no explanation, no markdown.`;
 
+// Catches the common, unambiguous commands immediately so navigation still
+// works if Groq is slow, down, or returns something we can't parse.
+function quickParse(text, screen) {
+  const t = text.toLowerCase().trim();
+  if (t.includes("send money") || t.includes("transfer") || t.includes("send am"))
+    return { action: "NAVIGATE", screen: "transfer" };
+  if (t.includes("airtime") || t.includes("recharge")) return { action: "NAVIGATE", screen: "airtime" };
+  if (t.includes("buy data") || t.includes("data bundle")) return { action: "NAVIGATE", screen: "data" };
+  if (t.includes("history") || t.includes("transactions")) return { action: "NAVIGATE", screen: "history" };
+  if (t.includes("settings")) return { action: "NAVIGATE", screen: "settings" };
+  if (t.includes("go home") || t.includes("dashboard") || t.includes("go back") || t.includes("cancel"))
+    return { action: "NAVIGATE", screen: "home" };
+  if (t.includes("balance")) return { action: "REVEAL_BALANCE" };
+  if (screen !== "home" && (t.includes("confirm") || t.includes("yes") || t === "correct" || t === "proceed"))
+    return { action: "CONFIRM" };
+  if (t.includes("hey voicepay") || t.includes("start mic") || t.includes("wake up"))
+    return { action: "RESTART_MIC" };
+  return null; // let Groq handle it
+}
+
 export async function processCommand(transcript, context) {
   console.log("[AGENT] Processing:", transcript);
   console.log("[AGENT] Context:", JSON.stringify(context));
+
+  // Only short-circuit outside an in-progress conversation step, so field
+  // collection (which can legitimately contain words like "cancel" as a
+  // recipient name) still goes through Groq for context-aware extraction.
+  if (!context.conversationStep) {
+    const quickCheck = quickParse(transcript, context.currentScreen);
+    if (quickCheck) {
+      console.log("[AGENT] Quick parse hit:", quickCheck);
+      return quickCheck;
+    }
+  }
 
   const systemPrompt = SYSTEM_PROMPT(context);
 
@@ -89,7 +120,24 @@ export async function processCommand(transcript, context) {
       return { action: "UNKNOWN", suggestion: "API error" };
     }
 
-    const result = JSON.parse(data.choices[0].message.content);
+    const rawContent = data.choices[0].message.content;
+    console.log("[AGENT] Raw content string:", rawContent);
+
+    let result;
+    try {
+      result = JSON.parse(rawContent);
+    } catch (parseErr) {
+      console.error("[AGENT] JSON parse failed:", parseErr.message);
+      console.error("[AGENT] Content was:", rawContent);
+      // Try to extract action manually
+      if (rawContent.includes("NAVIGATE")) {
+        const screenMatch = rawContent.match(/"screen":\s*"(\w+)"/);
+        result = { action: "NAVIGATE", screen: screenMatch?.[1] || "home" };
+      } else {
+        result = { action: "UNKNOWN", suggestion: rawContent };
+      }
+    }
+
     console.log("[AGENT] Decision:", JSON.stringify(result));
     return result;
   } catch (err) {

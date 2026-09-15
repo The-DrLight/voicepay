@@ -160,6 +160,15 @@ export default function App() {
     setCurrentScreen(screen);
   };
 
+  const handleNavigate = (screen) => {
+    console.log("[VP] Manual navigation to:", screen);
+    navigate(screen, "tap");
+    setCurrentStep(null);
+    setCollectedData({});
+    currentStepRef.current = null;
+    collectedDataRef.current = {};
+  };
+
   const restartMic = () => {
     if (isMountedRef.current && autoRestartEnabledRef.current) {
       console.log("[VP] Mic started");
@@ -423,7 +432,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <AppHeader />
+      <AppHeader onNavigate={handleNavigate} />
       <main className="app-content">{renderScreen()}</main>
 
       <TranscriptBar isListening={isListening} transcript={transcript} error={error} />
