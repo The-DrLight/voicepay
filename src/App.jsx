@@ -69,13 +69,21 @@ export default function App() {
     dataDetailsRef.current = dataDetails;
   }, [dataDetails]);
 
-  const navigate = (screen) => {
-    console.log("[VP] Navigating to:", SCREEN_NAMES[screen] || screen);
+  const navigate = (screen, triggeredBy) => {
+    console.log("[VP] ── NAVIGATE ──────────────────");
+    console.log("[VP] From:", currentScreenRef.current);
+    console.log("[VP] To:", screen);
+    console.log("[VP] Triggered by:", triggeredBy ?? "(programmatic)");
     setCurrentScreen(screen);
   };
 
+  const formatAmount = (amount) => {
+    const num = parseFloat(amount);
+    if (isNaN(num)) return amount;
+    return `₦${num.toLocaleString("en-NG")}`;
+  };
+
   const handleIntent = (intent) => {
-    console.log("[VP] Intent parsed:", intent);
     switch (intent) {
       case INTENTS.NAVIGATE_TRANSFER:
         navigate("transfer");
@@ -175,11 +183,46 @@ export default function App() {
         const flow = getFlow(type);
         const currentStep = flow[stepIndex];
 
+        console.log("[VP] ── CONVERSATION ─────────────");
+        console.log("[VP] Flow type:", type);
+        console.log("[VP] Step index:", stepIndex);
+        console.log("[VP] Current field:", currentStep.field);
+        console.log("[VP] Raw transcript:", text);
+
         const cleanValue = currentStep.resolve
           ? currentStep.resolve(text)
           : await extractField(currentStep.field, text);
-        const newCollected = { ...collected, [currentStep.field]: cleanValue };
-        console.log("[VP] Conversation step:", currentStep.field, "->", cleanValue);
+        console.log("[VP] After Groq clean:", cleanValue);
+
+        const validation = currentStep.validate
+          ? currentStep.validate(cleanValue)
+          : { valid: true, value: cleanValue };
+
+        console.log("[VP] Validation result:", {
+          field: currentStep.field,
+          raw: text,
+          cleaned: cleanValue,
+          valid: validation.valid,
+          stored: validation.value ?? cleanValue,
+          error: validation.error,
+        });
+
+        if (!validation.valid) {
+          console.log("[VP] Validation failed, repeating question");
+          console.log("[VP] TTS speaking:", validation.error);
+          await speak(validation.error);
+          if (isMountedRef.current && autoRestartEnabledRef.current) {
+            console.log("[VP] Mic started");
+            startListeningRef.current?.();
+          }
+          return;
+        }
+
+        const storedValue = validation.value ?? cleanValue;
+        console.log("[VP] After validation:", storedValue);
+
+        const newCollected = { ...collected, [currentStep.field]: storedValue };
+        console.log("[VP] Collected so far:", newCollected);
         const nextIndex = stepIndex + 1;
 
         if (nextIndex < flow.length) {
@@ -188,7 +231,7 @@ export default function App() {
           setConvFlow(updated);
           convFlowRef.current = updated;
 
-          const confirmText = currentStep.confirm(cleanValue);
+          const confirmText = currentStep.confirm(storedValue);
           const nextPrompt = `${confirmText} ${flow[nextIndex].question}`;
           console.log("[VP] TTS speaking:", nextPrompt);
           await speak(nextPrompt);
@@ -200,15 +243,20 @@ export default function App() {
           if (type === "transfer") {
             setTransferDetails(newCollected);
             transferDetailsRef.current = newCollected;
-            console.log("[VP] Transfer details collected:", newCollected);
-            const summary = `You are sending ${newCollected.amount} to Daniel Olorunda, ${newCollected.bank}. Total debit including fees is ${(Number(newCollected.amount) || 0) + 10}. Say confirm to proceed or cancel to go back.`;
+            console.log("[VP] ── TRANSFER COMPLETE ───────");
+            console.log("[VP] Details:", JSON.stringify(newCollected));
+            const amountLabel = formatAmount(newCollected.amount);
+            const totalLabel = formatAmount((Number(newCollected.amount) || 0) + 10);
+            const summary = `You are sending ${amountLabel} to Daniel Olorunda at ${newCollected.bank}. Total debit including fees is ${totalLabel}. Say confirm to proceed or cancel to go back.`;
             console.log("[VP] TTS speaking:", summary);
             await speak(summary);
           } else {
             setDataDetails(newCollected);
             dataDetailsRef.current = newCollected;
-            console.log("[VP] Transfer details collected:", newCollected);
-            const summary = `To confirm: buying ${newCollected.amount} naira ${newCollected.network} for ${newCollected.phone}. Say confirm to proceed or cancel to go back.`;
+            console.log("[VP] ── TRANSFER COMPLETE ───────");
+            console.log("[VP] Details:", JSON.stringify(newCollected));
+            const amountLabel = formatAmount(newCollected.amount);
+            const summary = `To confirm: buying ${amountLabel} ${newCollected.network} for ${newCollected.phone}. Say confirm to proceed or cancel to go back.`;
             console.log("[VP] TTS speaking:", summary);
             await speak(summary);
           }
@@ -221,7 +269,11 @@ export default function App() {
         return; // skip intent parsing while a conversation is active
       }
 
+      console.log("[VP] ── INTENT ──────────────────");
+      console.log("[VP] Raw transcript:", text);
       const intent = parseIntent(text);
+      console.log("[VP] Parsed intent:", intent);
+      console.log("[VP] Active conversation:", !!convFlowRef.current);
       handleIntent(intent).then(() => {
         // speak() only resolves once its audio has finished playing, so
         // starting the mic right here (no artificial delay) can't pick up

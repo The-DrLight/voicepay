@@ -52,8 +52,9 @@ const PROMPTS = {
       Text: "${transcript}"`,
 };
 
-export async function extractField(field, transcript) {
-  const buildPrompt = PROMPTS[field];
+async function callGroq(field, prompt) {
+  console.log("[GROQ] Calling for field:", field);
+  console.log("[GROQ] Prompt:", prompt);
 
   try {
     const response = await fetch("/ai-extract", {
@@ -61,22 +62,37 @@ export async function extractField(field, transcript) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        messages: [
-          {
-            role: "user",
-            content: buildPrompt ? buildPrompt(transcript) : transcript,
-          },
-        ],
+        messages: [{ role: "user", content: prompt }],
         temperature: 0,
         max_tokens: 50,
       }),
     });
+
     const data = await response.json();
-    const result = data.choices?.[0]?.message?.content?.trim() || transcript;
-    console.log(`[VP] Field extracted [${field}]:`, transcript, "->", result);
-    return result;
+    console.log("[GROQ] Raw response:", JSON.stringify(data));
+
+    if (data.error) {
+      console.error("[GROQ] API error:", data.error);
+      return null;
+    }
+
+    const result = data.choices?.[0]?.message?.content?.trim();
+    console.log("[GROQ] Extracted result:", result);
+    return result || null;
   } catch (err) {
-    console.warn("[VP] Field extraction failed, using raw transcript:", err);
+    console.error("[GROQ] Fetch error:", err.message);
+    return null;
+  }
+}
+
+export async function extractField(field, transcript) {
+  const buildPrompt = PROMPTS[field];
+  const prompt = buildPrompt ? buildPrompt(transcript) : transcript;
+
+  const result = await callGroq(field, prompt);
+  if (!result) {
+    console.warn("[GROQ] No result, using raw transcript");
     return transcript;
   }
+  return result;
 }

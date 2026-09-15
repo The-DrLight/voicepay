@@ -64,6 +64,31 @@ export function resolveNetwork(transcript) {
   return transcript;
 }
 
+function validatePhone(value) {
+  const digits = (value || "").replace(/\D/g, "");
+  const valid = digits.length >= 10 && digits.length <= 11;
+  return {
+    valid,
+    value: digits,
+    error: valid
+      ? null
+      : `I heard ${digits.length} digits. Please say the full phone number clearly.`,
+  };
+}
+
+function validateAmount(value) {
+  const cleaned = (value || "").toString().replace(/[^0-9.]/g, "");
+  const num = parseFloat(cleaned);
+  const valid = !isNaN(num) && num > 0;
+  return {
+    valid,
+    value: valid ? num : value,
+    error: valid
+      ? null
+      : "I did not get a valid amount. Please say an amount like ten thousand naira or five hundred naira.",
+  };
+}
+
 const flows = {
   transfer: [
     {
@@ -72,21 +97,43 @@ const flows = {
         "Which bank? Say a number. 1 for GTBank, 2 for Access Bank, 3 for Zenith Bank, 4 for First Bank, 5 for UBA, 6 for Opay, 7 for PalmPay, 8 for Moniepoint, 9 for Kuda. Say more for other banks.",
       confirm: (v) => `${v}.`,
       resolve: resolveBank,
+      validate: (value) => {
+        const valid = BANKS.includes(value);
+        return {
+          valid,
+          error: valid
+            ? null
+            : "I did not catch that bank. Please say a number between 1 and 9, or say the bank name clearly.",
+        };
+      },
     },
     {
       field: "account_number",
-      question: "What is the 10-digit account number?",
+      question: "What is the 10-digit account number? Say each digit clearly.",
       confirm: (v) => `Account number ${v}. Account name is Daniel Olorunda.`,
+      validate: (value) => {
+        const digits = (value || "").replace(/\D/g, "");
+        const valid = digits.length === 10;
+        return {
+          valid,
+          value: digits,
+          error: valid
+            ? null
+            : `I heard ${digits.length} digits. Please say all 10 digits of the account number.`,
+        };
+      },
     },
     {
       field: "amount",
       question: "How much do you want to send?",
       confirm: (v) => `${v}.`,
+      validate: validateAmount,
     },
     {
       field: "narration",
       question: "Any narration? Say skip to continue.",
       confirm: (v) => `${v}.`,
+      validate: (value) => ({ valid: true, value }),
     },
   ],
   data: [
@@ -95,16 +142,27 @@ const flows = {
       question: "Which network? Say 1 for MTN, 2 for Airtel, 3 for Glo, 4 for 9mobile.",
       confirm: (v) => `${v}.`,
       resolve: resolveNetwork,
+      validate: (value) => {
+        const valid = NETWORKS.includes(value);
+        return {
+          valid,
+          error: valid
+            ? null
+            : "I did not catch that network. Please say a number between 1 and 4, or say the network name clearly.",
+        };
+      },
     },
     {
       field: "phone",
       question: "What is the phone number?",
       confirm: (v) => `${v}.`,
+      validate: validatePhone,
     },
     {
       field: "amount",
       question: "How much?",
       confirm: (v) => `${v} naira.`,
+      validate: validateAmount,
     },
   ],
   airtime: [
@@ -113,16 +171,27 @@ const flows = {
       question: "Which network? Say 1 for MTN, 2 for Airtel, 3 for Glo, 4 for 9mobile.",
       confirm: (v) => `${v}.`,
       resolve: resolveNetwork,
+      validate: (value) => {
+        const valid = NETWORKS.includes(value);
+        return {
+          valid,
+          error: valid
+            ? null
+            : "I did not catch that network. Please say a number between 1 and 4, or say the network name clearly.",
+        };
+      },
     },
     {
       field: "phone",
       question: "What is the phone number?",
       confirm: (v) => `${v}.`,
+      validate: validatePhone,
     },
     {
       field: "amount",
       question: "How much airtime?",
       confirm: (v) => `${v} naira.`,
+      validate: validateAmount,
     },
   ],
 };
