@@ -8,15 +8,30 @@ const PROMPTS = {
       bank name mentioned.
       Text: "${transcript}"`,
 
-  account_number: (transcript) => `Extract only the 10-digit account
-      number from this text. Return ONLY the digits,
-      no spaces, no other text.
-      Text: "${transcript}"`,
+  account_number: (transcript) => `Extract the phone or account number
+      from this text. It should be 10 digits.
+      Rules:
+      - Remove all non-digit characters
+      - If you see digits spoken separately like
+        "8 1 1 4" treat them as one number "8114"
+      - Return ONLY the digits, nothing else
+      - If multiple numbers, return the longest one
+      - The number should start with common Nigerian
+        prefixes: 0, 8, 7, 9 or two digit codes
+      Text: "${transcript}"
+      Return only digits:`,
 
-  amount: (transcript) => `Extract only the naira amount from this text.
-      Return ONLY a number (e.g. 10000 for ten thousand
-      naira). Convert words to numbers.
-      Text: "${transcript}"`,
+  amount: (transcript) => `Extract the naira amount as a number only.
+      Rules:
+      - "ten thousand" = 10000
+      - "five hundred" = 500
+      - "two thousand five hundred" = 2500
+      - "fifty k" = 50000
+      - If only "naira" with no number, return "0"
+      - Return ONLY the number, no currency symbol,
+        no text
+      Text: "${transcript}"
+      Return only the number:`,
 
   narration: (transcript) => `Extract the narration/note/description
       from this text, or return "none" if the person

@@ -5,9 +5,9 @@ import { useCallback, useRef, useState } from "react";
 const STT_ENDPOINT = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stt-stream`;
 const SAMPLE_RATE = 16000;
 const MIN_CHUNK_BYTES = 1200;
-const SILENCE_THRESHOLD = 0.01; // RMS energy below this counts as silence
-const SILENCE_DURATION_MS = 1800; // stop after this much continuous silence
-const MIN_SPEECH_DURATION_MS = 1000; // ignore silence during the opening beat
+const SILENCE_THRESHOLD = 0.02; // RMS energy below this counts as silence
+const SILENCE_DURATION_MS = 2200; // stop after this much continuous silence
+const MIN_SPEECH_DURATION_MS = 1500; // ignore silence during the opening beat
 
 const ERROR_MESSAGES = {
   AUTHENTICATION_ERROR: "Voice authentication failed. Check your API key.",
@@ -124,9 +124,19 @@ export function useVoiceCommand({ onTranscript } = {}) {
         if (rms < SILENCE_THRESHOLD) {
           if (!silenceStartRef.current) {
             silenceStartRef.current = Date.now();
-          } else if (Date.now() - silenceStartRef.current > SILENCE_DURATION_MS) {
-            silenceStartRef.current = null;
-            stopListeningRef.current?.();
+          } else {
+            const silenceDuration = Date.now() - silenceStartRef.current;
+            console.log(
+              "[VP] Silence detected, RMS:",
+              rms.toFixed(4),
+              "duration:",
+              silenceDuration,
+              "ms"
+            );
+            if (silenceDuration > SILENCE_DURATION_MS) {
+              silenceStartRef.current = null;
+              stopListeningRef.current?.();
+            }
           }
         } else {
           silenceStartRef.current = null;

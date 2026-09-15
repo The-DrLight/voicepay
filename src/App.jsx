@@ -175,7 +175,9 @@ export default function App() {
         const flow = getFlow(type);
         const currentStep = flow[stepIndex];
 
-        const cleanValue = await extractField(currentStep.field, text);
+        const cleanValue = currentStep.resolve
+          ? currentStep.resolve(text)
+          : await extractField(currentStep.field, text);
         const newCollected = { ...collected, [currentStep.field]: cleanValue };
         console.log("[VP] Conversation step:", currentStep.field, "->", cleanValue);
         const nextIndex = stepIndex + 1;
