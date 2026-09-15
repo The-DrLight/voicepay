@@ -1,38 +1,38 @@
 import { useEffect, useState } from "react";
+import { NETWORKS, DATA_PLANS } from "../utils/mockData";
 import { speak } from "../utils/ttsService";
 
-const NETWORKS = [
-  { name: "MTN", color: "#FFC300" },
-  { name: "Airtel", color: "#FF0000" },
-  { name: "Glo", color: "#008751" },
-  { name: "9mobile", color: "#006600" },
-];
-
-const QUICK_AMOUNTS = [100, 200, 500, 1000];
-
 export default function DataAirtime({ navigate, details }) {
-  const [tab, setTab] = useState("data");
   const [network, setNetwork] = useState(NETWORKS[0].name);
   const [phone, setPhone] = useState("");
-  const [amount, setAmount] = useState("");
+  const [selectedPlan, setSelectedPlan] = useState(null);
 
   useEffect(() => {
     if (!details) return;
-    if (details.network) setNetwork(details.network);
+    if (details.network) {
+      const match = NETWORKS.find((n) => n.name.toLowerCase() === String(details.network).toLowerCase());
+      if (match) setNetwork(match.name);
+    }
     if (details.phone) setPhone(details.phone);
-    if (details.amount != null) setAmount(String(details.amount));
   }, [details]);
 
-  const handleConfirm = () => {
-    const kind = tab === "data" ? "data" : "airtime";
-    speak(`Buying ₦${amount || 0} ${network} ${kind} for ${phone || "your number"}.`);
-    navigate("home");
-  };
+  useEffect(() => {
+    setSelectedPlan(null);
+  }, [network]);
 
   const handleBack = () => {
+    console.log("[VP] Navigating to: home");
     speak("Going back to dashboard.");
     navigate("home");
   };
+
+  const handleBuy = () => {
+    console.log("[VP] Transfer details collected:", { type: "data", network, phone, plan: selectedPlan });
+    speak(`Buying ${selectedPlan?.size} ${network} data for ${phone || "your number"}.`);
+    navigate("home");
+  };
+
+  const plans = DATA_PLANS[network] || [];
 
   return (
     <div className="screen">
@@ -40,22 +40,7 @@ export default function DataAirtime({ navigate, details }) {
         <button className="back-button" onClick={handleBack} aria-label="Back">
           ←
         </button>
-        <h1 className="screen-title">Data & Airtime</h1>
-      </div>
-
-      <div className="tab-row">
-        <button
-          className={`tab-item ${tab === "data" ? "active" : ""}`}
-          onClick={() => setTab("data")}
-        >
-          Data
-        </button>
-        <button
-          className={`tab-item ${tab === "airtime" ? "active" : ""}`}
-          onClick={() => setTab("airtime")}
-        >
-          Airtime
-        </button>
+        <h1 className="screen-title">Buy Data</h1>
       </div>
 
       <div className="network-grid">
@@ -65,10 +50,12 @@ export default function DataAirtime({ navigate, details }) {
             className={`network-card ${network === n.name ? "selected" : ""}`}
             onClick={() => setNetwork(n.name)}
           >
+            {network === n.name && <span className="network-check">✓</span>}
             <span className="network-circle" style={{ background: n.color }}>
               {n.name}
             </span>
             <span className="network-name">{n.name}</span>
+            <span className="network-hint">Tap to select</span>
           </button>
         ))}
       </div>
@@ -85,35 +72,26 @@ export default function DataAirtime({ navigate, details }) {
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
         />
-
-        <label className="field-label" htmlFor="data-amount">
-          Amount
-        </label>
-        <input
-          id="data-amount"
-          className="text-input"
-          type="number"
-          placeholder="e.g. 1000"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-
-        <div className="quick-amounts">
-          {QUICK_AMOUNTS.map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={`quick-amount-btn ${String(amount) === String(value) ? "active" : ""}`}
-              onClick={() => setAmount(String(value))}
-            >
-              ₦{value}
-            </button>
-          ))}
-        </div>
       </div>
 
-      <button className="btn btn-primary" onClick={handleConfirm}>
-        Confirm
+      <div className="plan-grid">
+        {plans.map((plan) => (
+          <button
+            key={plan.size}
+            className={`plan-card ${selectedPlan?.size === plan.size ? "selected" : ""}`}
+            onClick={() => setSelectedPlan(plan)}
+          >
+            <div>
+              <p className="plan-size">{plan.size}</p>
+              <p className="plan-validity">{plan.validity}</p>
+            </div>
+            <span className="plan-price">₦{plan.price.toLocaleString("en-NG")}</span>
+          </button>
+        ))}
+      </div>
+
+      <button className="btn btn-primary" disabled={!selectedPlan || !phone} onClick={handleBuy}>
+        Buy Data
       </button>
     </div>
   );

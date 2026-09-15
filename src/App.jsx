@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import Dashboard from "./components/Dashboard";
 import Transfer from "./components/Transfer";
+import Airtime from "./components/Airtime";
 import DataAirtime from "./components/DataAirtime";
+import Bills from "./components/Bills";
 import History from "./components/History";
 import Settings from "./components/Settings";
 import MicButton from "./components/MicButton";
@@ -17,7 +19,9 @@ import { getFlow } from "./utils/conversationFlow";
 const SCREEN_NAMES = {
   home: "Dashboard",
   transfer: "Transfer",
+  airtime: "Buy Airtime",
   data: "Buy Data",
+  bills: "Pay Bills",
   history: "History",
   settings: "Settings",
 };
@@ -28,7 +32,8 @@ export default function App() {
   const [revealBalance, setRevealBalance] = useState(false);
   const [transferDetails, setTransferDetails] = useState({});
   const [dataDetails, setDataDetails] = useState({});
-  // null | { type: 'transfer' | 'data', stepIndex, collected }
+  const [showMoreSheet, setShowMoreSheet] = useState(false);
+  // null | { type: 'transfer' | 'data' | 'airtime', stepIndex, collected }
   const [convFlow, setConvFlow] = useState(null);
 
   const isMountedRef = useRef(true);
@@ -48,6 +53,10 @@ export default function App() {
   const convFlowRef = useRef(null);
 
   useEffect(() => {
+    console.log("[VP] App mounted");
+  }, []);
+
+  useEffect(() => {
     currentScreenRef.current = currentScreen;
   }, [currentScreen]);
 
@@ -60,29 +69,46 @@ export default function App() {
   }, [dataDetails]);
 
   const navigate = (screen) => {
+    console.log("[VP] Navigating to:", SCREEN_NAMES[screen] || screen);
     setCurrentScreen(screen);
   };
 
   const handleIntent = (intent) => {
+    console.log("[VP] Intent parsed:", intent);
     switch (intent) {
       case INTENTS.NAVIGATE_TRANSFER:
         navigate("transfer");
         return speak("Opening transfer.").then(async () => {
+          console.log("[VP] TTS speaking: Opening transfer.");
           const flow = getFlow("transfer");
           const newConv = { type: "transfer", stepIndex: 0, collected: {} };
           setConvFlow(newConv);
           convFlowRef.current = newConv;
           await speak(flow[0].question);
         });
+      case INTENTS.NAVIGATE_AIRTIME:
+        navigate("airtime");
+        return speak("Opening airtime.").then(async () => {
+          console.log("[VP] TTS speaking: Opening airtime.");
+          const flow = getFlow("airtime");
+          const newConv = { type: "airtime", stepIndex: 0, collected: {} };
+          setConvFlow(newConv);
+          convFlowRef.current = newConv;
+          await speak(flow[0].question);
+        });
       case INTENTS.NAVIGATE_DATA:
         navigate("data");
-        return speak("Opening data and airtime.").then(async () => {
+        return speak("Opening data.").then(async () => {
+          console.log("[VP] TTS speaking: Opening data.");
           const flow = getFlow("data");
           const newConv = { type: "data", stepIndex: 0, collected: {} };
           setConvFlow(newConv);
           convFlowRef.current = newConv;
           await speak(flow[0].question);
         });
+      case INTENTS.NAVIGATE_BILLS:
+        navigate("bills");
+        return speak("Opening bills.");
       case INTENTS.NAVIGATE_HISTORY:
         navigate("history");
         return speak("Here are your recent transactions.");
@@ -104,16 +130,18 @@ export default function App() {
       case INTENTS.CONFIRM_TRANSFER: {
         if (currentScreenRef.current === "transfer") {
           const d = transferDetailsRef.current;
-          if (d.amount && d.recipient) {
+          if (d.amount && d.bank) {
+            console.log("[VP] Transfer details collected:", d);
             setTransferDetails({});
             transferDetailsRef.current = {};
             navigate("home");
             return speak("Transfer confirmed. Returning to dashboard.");
           }
         }
-        if (currentScreenRef.current === "data") {
+        if (currentScreenRef.current === "data" || currentScreenRef.current === "airtime") {
           const d = dataDetailsRef.current;
           if (d.amount && d.network && d.phone) {
+            console.log("[VP] Transfer details collected:", d);
             setDataDetails({});
             dataDetailsRef.current = {};
             navigate("home");
@@ -132,18 +160,22 @@ export default function App() {
         navigate("home");
         return speak("Cancelled. Returning to dashboard.");
       default:
+        console.log("[VP] Error: unrecognised intent");
         return Promise.resolve();
     }
   };
 
   const { isListening, transcript, error, startListening, stopListening } = useVoiceCommand({
     onTranscript: async (text) => {
+      console.log("[VP] Voice command received:", text);
+
       if (convFlowRef.current) {
         const { type, stepIndex, collected } = convFlowRef.current;
         const flow = getFlow(type);
         const currentStep = flow[stepIndex];
 
         const newCollected = { ...collected, [currentStep.field]: text };
+        console.log("[VP] Conversation step:", currentStep.field, "->", text);
         const nextIndex = stepIndex + 1;
 
         if (nextIndex < flow.length) {
@@ -153,7 +185,9 @@ export default function App() {
           convFlowRef.current = updated;
 
           const confirmText = currentStep.confirm(text);
-          await speak(`${confirmText} ${flow[nextIndex].question}`);
+          const nextPrompt = `${confirmText} ${flow[nextIndex].question}`;
+          console.log("[VP] TTS speaking:", nextPrompt);
+          await speak(nextPrompt);
         } else {
           // All fields collected, read back the full summary
           convFlowRef.current = null;
@@ -162,19 +196,22 @@ export default function App() {
           if (type === "transfer") {
             setTransferDetails(newCollected);
             transferDetailsRef.current = newCollected;
-            await speak(
-              `To confirm: sending ${newCollected.amount} to ${newCollected.recipient}, ${newCollected.bank} account ${newCollected.account_number}. Say confirm to proceed or cancel to go back.`
-            );
+            console.log("[VP] Transfer details collected:", newCollected);
+            const summary = `You are sending ${newCollected.amount} to Daniel Olorunda, ${newCollected.bank}. Total debit including fees is ${(Number(newCollected.amount) || 0) + 10}. Say confirm to proceed or cancel to go back.`;
+            console.log("[VP] TTS speaking:", summary);
+            await speak(summary);
           } else {
             setDataDetails(newCollected);
             dataDetailsRef.current = newCollected;
-            await speak(
-              `To confirm: buying ${newCollected.amount} naira ${newCollected.network} for ${newCollected.phone}. Say confirm to proceed or cancel to go back.`
-            );
+            console.log("[VP] Transfer details collected:", newCollected);
+            const summary = `To confirm: buying ${newCollected.amount} naira ${newCollected.network} for ${newCollected.phone}. Say confirm to proceed or cancel to go back.`;
+            console.log("[VP] TTS speaking:", summary);
+            await speak(summary);
           }
         }
 
         if (isMountedRef.current && autoRestartEnabledRef.current) {
+          console.log("[VP] Mic started");
           startListeningRef.current?.();
         }
         return; // skip intent parsing while a conversation is active
@@ -186,6 +223,7 @@ export default function App() {
         // starting the mic right here (no artificial delay) can't pick up
         // the tail of the TTS feedback.
         if (isMountedRef.current && autoRestartEnabledRef.current) {
+          console.log("[VP] Mic started");
           startListeningRef.current?.();
         }
       });
@@ -208,18 +246,24 @@ export default function App() {
     // Browsers block autoplaying audio (and getUserMedia is tied to the same
     // gesture requirement) until a real user interaction happens, so both the
     // welcome speech and the mic can only be kicked off from this click handler.
-    await speak(
-      "Welcome back Amara. You can say: send money, buy data, check balance, check history, or open settings."
-    );
-    if (isMountedRef.current) startListening();
+    const welcome =
+      "Welcome back Amara. You can say: send money, buy airtime, buy data, pay bills, check balance, check history, or open settings.";
+    console.log("[VP] TTS speaking:", welcome);
+    await speak(welcome);
+    if (isMountedRef.current) {
+      console.log("[VP] Mic started");
+      startListening();
+    }
   };
 
   const toggleListening = () => {
     if (isListening) {
       autoRestartEnabledRef.current = false;
+      console.log("[VP] Mic stopped, reason: manual");
       stopListening();
     } else {
       autoRestartEnabledRef.current = true;
+      console.log("[VP] Mic started");
       startListening();
       speak("Listening for your command.");
     }
@@ -229,15 +273,25 @@ export default function App() {
     switch (currentScreen) {
       case "transfer":
         return <Transfer navigate={navigate} details={transferDetails} />;
+      case "airtime":
+        return <Airtime navigate={navigate} details={dataDetails} />;
       case "data":
         return <DataAirtime navigate={navigate} details={dataDetails} />;
+      case "bills":
+        return <Bills navigate={navigate} />;
       case "history":
         return <History navigate={navigate} />;
       case "settings":
         return <Settings navigate={navigate} />;
       case "home":
       default:
-        return <Dashboard navigate={navigate} revealBalance={revealBalance} />;
+        return (
+          <Dashboard
+            navigate={navigate}
+            revealBalance={revealBalance}
+            onMore={() => setShowMoreSheet(true)}
+          />
+        );
     }
   };
 
@@ -253,6 +307,32 @@ export default function App() {
       <TranscriptBar isListening={isListening} transcript={transcript} error={error} />
 
       <MicButton isListening={isListening} onToggle={toggleListening} />
+
+      {showMoreSheet && (
+        <div className="sheet-backdrop" onClick={() => setShowMoreSheet(false)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <p className="sheet-title">More</p>
+            <div className="sheet-list">
+              {[
+                { key: "bills", label: "Pay Bills" },
+                { key: "settings", label: "Settings" },
+                { key: "history", label: "Transaction History" },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  className="sheet-list-item"
+                  onClick={() => {
+                    setShowMoreSheet(false);
+                    navigate(item.key);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
